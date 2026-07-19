@@ -14,6 +14,10 @@ test('exports the auth surface', () => {
 test('exports incidents surface', () => {
   assert.equal(typeof WOTS.all, 'function');
   assert.equal(typeof WOTS.detail, 'function');
+  assert.equal(typeof WOTS.submit, 'function');
+  assert.equal(typeof WOTS.cancel, 'function');
+  assert.equal(typeof WOTS.uploadImage, 'function');
+  assert.equal(typeof WOTS.TYPES, 'object');
 });
 
 test('exports WotsError with codes registry', () => {

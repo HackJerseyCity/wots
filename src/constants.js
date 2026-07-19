@@ -13,6 +13,9 @@ const DEFAULT_HEADERS = Object.freeze({
   'Accept-Encoding': ACCEPT_ENCODING,
 });
 
+const IMAGE_BUCKET = 'incidentimages';
+const IMAGE_CONTENT_TYPE = 'binary/octet-stream';
+
 module.exports = {
   BASE_URL,
   USER_AGENT,
@@ -20,4 +23,6 @@ module.exports = {
   ACCEPT_LANGUAGE,
   ACCEPT_ENCODING,
   DEFAULT_HEADERS,
+  IMAGE_BUCKET,
+  IMAGE_CONTENT_TYPE,
 };

@@ -53,10 +53,17 @@ try {
     case WOTS.WotsError.codes.CODE_NOT_VALID:      /* wrong 4-digit code */  break;
     case WOTS.WotsError.codes.INVALID_CODE_FORMAT: /* code wasn't 4 digits */break;
     case WOTS.WotsError.codes.INVALID_INCIDENT_ID: /* bad detail() id */     break;
+    case WOTS.WotsError.codes.INVALID_CANCEL_INFO: /* bad cancel() info */   break;
+    case WOTS.WotsError.codes.INVALID_REPORT:      /* submit() bad input */  break;
+    case WOTS.WotsError.codes.UNKNOWN_TYPE:        /* submit() type not in catalog */ break;
+    case WOTS.WotsError.codes.REDIRECT_911:        /* submit() blocked — call 911 */  break;
+    case WOTS.WotsError.codes.DUPLICATES_FOUND:    /* submit() saw nearby reports */  break;
+    case WOTS.WotsError.codes.PHOTO_UPLOAD_FAILED: /* submit() Cognito/S3 error */    break;
     case WOTS.WotsError.codes.TIMEOUT:             /* request timed out */   break;
     case WOTS.WotsError.codes.NETWORK_ERROR:       /* transport error */     break;
     default: /* REGISTER_FAILED, ACTIVATE_FAILED, RESEND_FAILED,
-               LIST_FAILED, DETAIL_FAILED, ... */
+               LIST_FAILED, DETAIL_FAILED, SUBMIT_FAILED,
+               CANCEL_FAILED, GEO_LOOKUP_FAILED, ... */
   }
 }
 ```
@@ -118,6 +125,49 @@ console.log(full.address, full.publicResolution, full.userContent.imageUrls);
 
 Rejects synchronously with `WotsError('INVALID_INCIDENT_ID')` for a missing/non-string id. Server 4xx/5xx surface as `WotsError('DETAIL_FAILED', ...)` with `err.status` and `err.body` attached.
 
+### `WOTS.submit(token, report, opts?) → Promise<{ incidentId, duplicatesSeen, cancelInfo }>`
+
+Files a new incident report. The API is deliberately small; the library does the region lookup, the (optional) Cognito → S3 photo upload, the 20-field body assembly, and the duplicate/force-create dance under the hood.
+
+```js
+const result = await WOTS.submit(token, {
+  type: 'OTHER_PARKING_VIOLATION',  // required — one of the 89 codes in WOTS.TYPES
+  lat: 40.7178,                     // required
+  lon: -74.0431,                    // required
+  phone: '+15551234567',            // required
+  address: '123 Main St, Jersey City NJ 07302',  // optional; defaults to lat,lon
+  comment: 'Blocking the crosswalk',              // optional
+  image: fs.readFileSync('photo.jpg'),            // optional; Buffer or Uint8Array
+});
+
+console.log(result.incidentId);       // the newly-created publicIncidentId
+console.log(result.duplicatesSeen);   // [] on clean create; non-empty if we auto-confirmed past nearby reports
+console.log(result.cancelInfo);       // { incidentId, lat, lon, submittedAt } — hold onto this for cancel
+```
+
+**Opts:** `{ regionId, imageBucket, imageRegion, baseUrl, fetchImpl, timeoutMs = 30_000, autoConfirmDuplicates = true }`. `timeoutMs` is 30 s because the server's geospatial duplicate search averages ~15 s. Setting `autoConfirmDuplicates: false` makes `submit` throw `WotsError('DUPLICATES_FOUND', { duplicates })` on the first-round duplicate response instead of force-retrying — for callers who want to prompt a human first.
+
+**Photos:** pass `image` as a `Buffer` or `Uint8Array`. Under the hood the library mints an anonymous Cognito identity (`us-east-1:6a0cdcee-767b-4cca-8c69-7473509288c8`), gets temporary S3 credentials, SigV4-signs a PUT to `s3.amazonaws.com/incidentimages/{M}_{YYYY}/{uuid}_{ms}.jpg` (path-style, `binary/octet-stream`), and records just the object key (e.g. `7_2026/…jpg`) in `imagesUrs`. The `incidentimages` bucket is CloudFront's origin, so the public URL for the photo is `https://d1vfd7a3zydjom.cloudfront.net/{imagesUrs[0]}` — no bucket prefix, no auth. `opts.imageBucket` lets you override the default `incidentimages` bucket if the API ever moves. No other config needed.
+
+**Safety:** types with `redirect911: true` throw `WotsError('REDIRECT_911')` client-side before any request. Those are 911-worthy incidents; call emergency services, not WOTS.
+
+**No public URL for the new report.** WOTS doesn't publish per-incident public URLs — `result.incidentId` is the reference. Verify with `await WOTS.detail(token, result.incidentId)` or `await WOTS.all(token)`. If you attached a photo, the CDN URL is `https://d1vfd7a3zydjom.cloudfront.net/{imagesUrs[0]}` and it becomes visible via `detail(...).userContent.imageUrls[0]` once the CDN picks it up (usually seconds).
+
+**Cancel linkage:** the returned `cancelInfo` is exactly what `WOTS.cancel` (below) needs. It preserves the fractional-ms `submittedAt` we sent, which the cancel endpoint requires verbatim.
+
+### `WOTS.cancel(token, cancelInfo, opts?) → Promise<Incident>`
+
+Cancels a report you just filed. Backed by `POST /api/incident/cancel` with `{ userId, lat, lon, submittedAt, incidentId }`. Pass the `cancelInfo` object that `submit` returned — the fractional-ms `submittedAt` in there must be the exact value we sent on the original submit, not `Date.now()` at cancel time.
+
+```js
+const result = await WOTS.submit(token, { type, lat, lon, phone, comment });
+// realized it's a mistake / duplicate:
+const canceled = await WOTS.cancel(token, result.cancelInfo);
+console.log(canceled.primaryText);  // "Issue Cancelled by You"
+```
+
+The server has a short cancel window; too-late attempts surface as `WotsError('CANCEL_FAILED')` with `err.status`/`err.body`. Malformed `cancelInfo` throws `WotsError('INVALID_CANCEL_INFO')` client-side, no HTTP call.
+
 ## Testing
 
 ```
@@ -148,6 +198,18 @@ WOTS_TOKEN=eyJ... node spike/all.js
 
 ```
 WOTS_TOKEN=eyJ... node spike/detail.js <incidentId>
+```
+
+**`spike/submit.js`** — files a new report. **This creates a real, persisted incident visible to enforcement.** The script prints a big warning banner, previews the outgoing JSON, and requires a literal `YES` before hitting the wire. On success, it prints `cancelInfo` — save it if you might want to cancel.
+
+```
+WOTS_TOKEN=eyJ... node spike/submit.js
+```
+
+**`spike/cancel.js`** — cancels a report using the `cancelInfo` printed by `spike/submit.js`. Reads the JSON from `cancelInfo.json` (default) or the path given as argv:
+
+```
+WOTS_TOKEN=eyJ... node spike/cancel.js path/to/cancelInfo.json
 ```
 
 **Typical loop:** `spike/login.js` → copy the JWT into `WOTS_TOKEN` → `spike/all.js` → copy an `id` from the preview → `spike/detail.js <id>`.

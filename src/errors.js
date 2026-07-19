@@ -13,19 +13,29 @@ const CODES = Object.freeze({
   LIST_FAILED: 'LIST_FAILED',
   DETAIL_FAILED: 'DETAIL_FAILED',
   INVALID_INCIDENT_ID: 'INVALID_INCIDENT_ID',
+  UNKNOWN_TYPE: 'UNKNOWN_TYPE',
+  REDIRECT_911: 'REDIRECT_911',
+  INVALID_REPORT: 'INVALID_REPORT',
+  DUPLICATES_FOUND: 'DUPLICATES_FOUND',
+  GEO_LOOKUP_FAILED: 'GEO_LOOKUP_FAILED',
+  PHOTO_UPLOAD_FAILED: 'PHOTO_UPLOAD_FAILED',
+  SUBMIT_FAILED: 'SUBMIT_FAILED',
+  CANCEL_FAILED: 'CANCEL_FAILED',
+  INVALID_CANCEL_INFO: 'INVALID_CANCEL_INFO',
   TIMEOUT: 'TIMEOUT',
   NETWORK_ERROR: 'NETWORK_ERROR',
 });
 
 class WotsError extends Error {
   constructor(code, details = {}) {
-    const { message, status, body, cause } = details;
+    const { message, status, body, cause, duplicates } = details;
     super(message || code);
     this.name = 'WotsError';
     this.code = code;
     if (status !== undefined) this.status = status;
     if (body !== undefined) this.body = body;
     if (cause !== undefined) this.cause = cause;
+    if (duplicates !== undefined) this.duplicates = duplicates;
   }
 }
 
