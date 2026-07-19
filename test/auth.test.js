@@ -24,11 +24,15 @@ function makeJwt(payload) {
   return `${b64url({ alg: 'HS512' })}.${b64url(payload)}.AAAA`;
 }
 
-test('normalizeUsPhone strips punctuation, adds leading 1', () => {
-  assert.equal(normalizeUsPhone('555-123-4567'), '15551234567');
-  assert.equal(normalizeUsPhone('(555) 123-4567'), '15551234567');
-  assert.equal(normalizeUsPhone('+1 555 123 4567'), '15551234567');
-  assert.equal(normalizeUsPhone('15551234567'), '15551234567');
+test('normalizeUsPhone strips punctuation, adds leading +1', () => {
+  assert.equal(normalizeUsPhone('555-123-4567'), '+15551234567');
+  assert.equal(normalizeUsPhone('(555) 123-4567'), '+15551234567');
+  assert.equal(normalizeUsPhone('+1 555 123 4567'), '+15551234567');
+  assert.equal(normalizeUsPhone('15551234567'), '+15551234567');
+  assert.equal(normalizeUsPhone('+15551234567'), '+15551234567');
+  assert.equal(normalizeUsPhone('5551234567'), '+15551234567');
+  assert.equal(normalizeUsPhone('555.123.4567'), '+15551234567');
+  assert.equal(normalizeUsPhone('+1-555-123-4567'), '+15551234567');
 });
 
 test('normalizeUsPhone returns null for junk input', () => {
@@ -49,7 +53,7 @@ test('startLogin: happy path, POSTs compact JSON with iOS deviceType + UUID', as
       seen = opts;
       return {
         statusCode: 200,
-        data: JSON.stringify({ id: 'u1', phone: '15551234567', termsAccepted: true }),
+        data: JSON.stringify({ id: 'u1', phone: '+15551234567', termsAccepted: true }),
         responseOptions: { headers: { 'content-type': 'application/json' } },
       };
     });
@@ -59,12 +63,12 @@ test('startLogin: happy path, POSTs compact JSON with iOS deviceType + UUID', as
   assert.equal(seen.path, '/api/register/account');
   const body = JSON.parse(seen.body);
   assert.equal(body.deviceType, 'iOS');
-  assert.match(body.deviceId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-  assert.equal(body.phone, '15551234567');
-  assert.equal(seen.body, `{"deviceType":"iOS","deviceId":"${body.deviceId}","phone":"15551234567"}`);
+  assert.match(body.deviceId, /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/);
+  assert.equal(body.phone, '+15551234567');
+  assert.equal(seen.body, `{"deviceType":"iOS","phone":"+15551234567","deviceId":"${body.deviceId}"}`);
 
   assert.equal(session.userId, 'u1');
-  assert.equal(session.phone, '15551234567');
+  assert.equal(session.phone, '+15551234567');
   assert.equal(session.termsAccepted, true);
   assert.equal(session.deviceType, 'iOS');
   assert.equal(session.deviceId, body.deviceId);
@@ -140,13 +144,16 @@ test('completeLogin: GETs activate, calls accept/terms, returns decoded token', 
       return { statusCode: 200, data: '{}', responseOptions: { headers: { 'content-type': 'application/json' } } };
     });
 
-  const session = { userId: 'u1', phone: '15551234567', termsAccepted: false, deviceType: 'iOS', deviceId: 'x' };
+  const session = { userId: 'u1', phone: '+15551234567', termsAccepted: false, deviceType: 'iOS', deviceId: 'x' };
   const result = await completeLogin(session, '1234');
 
   const params = new URL('http://x' + activateOpts.path).searchParams;
   assert.equal(params.get('id'), 'u1');
   assert.equal(params.get('key'), '1234');
   assert.equal(termsOpts.body, '{"userId":"u1"}');
+  const termsAuth = Object.entries(termsOpts.headers)
+    .find(([k]) => k.toLowerCase() === 'authorization')?.[1];
+  assert.equal(termsAuth, `Bearer ${token}`);
 
   assert.equal(result.token, token);
   assert.equal(result.sub, 'u1');

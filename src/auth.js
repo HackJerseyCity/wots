@@ -14,8 +14,8 @@ const RESEND_TIMEOUT_MS = 20_000;
 function normalizeUsPhone(tel) {
   if (typeof tel !== 'string') return null;
   const digits = tel.replace(/\D+/g, '');
-  if (digits.length === 10) return `1${digits}`;
-  if (digits.length === 11 && digits.startsWith('1')) return digits;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
   return null;
 }
 
@@ -27,9 +27,9 @@ async function startLogin(tel, opts = {}) {
     });
   }
   const deviceType = 'iOS';
-  const deviceId = opts.deviceId || randomUUID();
+  const deviceId = opts.deviceId || randomUUID().toUpperCase();
 
-  const body = { deviceType, deviceId, phone };
+  const body = { deviceType, phone, deviceId };
 
   const data = await request('/api/register/account', {
     method: 'POST',
@@ -91,6 +91,7 @@ async function completeLogin(session, code, opts = {}) {
     await request('/api/register/accept/terms', {
       method: 'POST',
       body: { userId: session.userId },
+      authToken: token,
       timeoutMs: opts.termsTimeoutMs ?? TERMS_TIMEOUT_MS,
       baseUrl: opts.baseUrl,
       fetchImpl: opts.fetchImpl,

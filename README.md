@@ -35,7 +35,7 @@ await WOTS.resendCode(session);
 
 ### Inputs
 
-- **`tel`** — any US format. `555-123-4567`, `(555) 123-4567`, `+1 555 123 4567`, and `15551234567` all normalize to `15551234567`. Non-US or malformed input rejects with `WotsError('INVALID_PHONE')` *before* any HTTP call.
+- **`tel`** — any US format. `555-123-4567`, `(555) 123-4567`, `+1 555 123 4567`, `15551234567`, and `+15551234567` all normalize to `+15551234567`. Non-US or malformed input rejects with `WotsError('INVALID_PHONE')` *before* any HTTP call. The `+` prefix is required by the server — see [Note on account reattachment](#note-on-account-reattachment) below for why.
 - **`code`** — exactly 4 digits as a string. Anything else rejects with `WotsError('INVALID_CODE_FORMAT')` before any HTTP call.
 
 ### Errors
@@ -60,6 +60,14 @@ try {
 ```
 
 `err.status` and `err.body` are attached when the failure came from an HTTP response.
+
+### Note on account reattachment
+
+The reference documentation this package was built from (`doc/wots-reference.md`, "Open Question #1") lists it as an unresolved mystery whether calling `register/account` on a phone number that already has a WOTS account reattaches to that existing account or silently spawns a new empty orphan. The Python scripts in `doc/` demonstrated the failure mode — a call would come back looking like success, but return a brand-new empty `userId`, so listing reports gave zero results.
+
+**This client resolves it: the reattachment key is the phone-number string, with the `+` prefix.** Sending `+15551234567` reattaches to the caller's real account. Sending `15551234567` (no `+`) silently spawns a fresh orphan. Confirmed 2026-07-19 by comparing a Charles Proxy capture of the real iOS app (sends `+`, reattaches) against this client without the `+` (spawns orphan) and with the `+` (reattaches to the same 2018-vintage `userId` the real app landed on). `deviceId` value and freshness do not matter — a random UUID reattaches fine when the phone format is right.
+
+`normalizeUsPhone` in `src/auth.js` handles this automatically, but if you're extending this client or reading a captured trace, keep the `+` in mind. Removing it — for "cleanup" or to match the format the reference doc's Python scripts historically used — silently breaks every login.
 
 ### End-to-end example
 
@@ -112,4 +120,4 @@ Runs `node --test` against `test/**/*.test.js`. HTTP is intercepted by `undici`'
 node spike/login.js
 ```
 
-Every `startLogin` call creates a fresh WOTS account and can trip a server-side `SMS_THRESHOLD` rate limit — don't hammer it.
+For a phone number with an existing WOTS account, `startLogin` reattaches to it (see [Note on account reattachment](#note-on-account-reattachment)); for a phone number with no prior account, it creates one. Either way, hitting `register/account` too often can trip the server-side `SMS_THRESHOLD` rate limit — don't hammer it.
