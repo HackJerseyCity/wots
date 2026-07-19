@@ -12,6 +12,7 @@ async function request(path, options = {}) {
     baseUrl = BASE_URL,
     fetchImpl = globalThis.fetch,
     failureCode = 'REQUEST_FAILED',
+    authToken,
   } = options;
 
   const url = new URL(path, baseUrl);
@@ -22,6 +23,7 @@ async function request(path, options = {}) {
   }
 
   const headers = { ...DEFAULT_HEADERS };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
   let payload;
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';

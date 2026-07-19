@@ -80,6 +80,22 @@ console.log('expires:', new Date(result.exp * 1000).toISOString());
 rl.close();
 ```
 
+## Reports
+
+### `WOTS.all(token, opts?) → Promise<Incident[]>`
+
+Fetches every one of your own reports, paging through `/api/incident/short/{userId}/{offset}/{limit}` under the hood. The `userId` is pulled from the token's `sub` claim — you only pass the token.
+
+```js
+const reports = await WOTS.all(token);
+console.log(`${reports.length} reports`);
+for (const r of reports.slice(0, 3)) {
+  console.log(r.id, r.address, r.typeName, r.primaryText);
+}
+```
+
+Options: `{ pageSize = 20, baseUrl, fetchImpl, timeoutMs }`. Pagination stops on an empty page or a short page. Server errors surface as `WotsError` with `err.status` attached; a 401/403 means the token is dead — re-authenticate.
+
 ## Testing
 
 ```

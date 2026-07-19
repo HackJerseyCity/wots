@@ -122,6 +122,34 @@ test('AbortController fires TIMEOUT', async (t) => {
   );
 });
 
+test('attaches Authorization: Bearer <token> when authToken is passed', async (t) => {
+  const agent = withMock();
+  t.after(() => agent.close());
+  let seen;
+  agent.get(BASE_URL).intercept({ path: '/api/whoami', method: 'GET' }).reply((opts) => {
+    seen = opts;
+    return { statusCode: 200, data: '{}', responseOptions: { headers: { 'content-type': 'application/json' } } };
+  });
+
+  await request('/api/whoami', { method: 'GET', authToken: 'jwt-abc' });
+  const h = headerLookup(seen.headers);
+  assert.equal(h('authorization'), 'Bearer jwt-abc');
+});
+
+test('omits Authorization when no token is passed', async (t) => {
+  const agent = withMock();
+  t.after(() => agent.close());
+  let seen;
+  agent.get(BASE_URL).intercept({ path: '/api/anon', method: 'GET' }).reply((opts) => {
+    seen = opts;
+    return { statusCode: 200, data: '{}', responseOptions: { headers: { 'content-type': 'application/json' } } };
+  });
+
+  await request('/api/anon', { method: 'GET' });
+  const h = headerLookup(seen.headers);
+  assert.equal(h('authorization'), undefined);
+});
+
 test('respects a custom baseUrl override', async (t) => {
   const agent = withMock();
   t.after(() => agent.close());
