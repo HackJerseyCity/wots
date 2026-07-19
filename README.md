@@ -52,9 +52,11 @@ try {
     case WOTS.WotsError.codes.SMS_THRESHOLD:       /* server rate-limited */ break;
     case WOTS.WotsError.codes.CODE_NOT_VALID:      /* wrong 4-digit code */  break;
     case WOTS.WotsError.codes.INVALID_CODE_FORMAT: /* code wasn't 4 digits */break;
+    case WOTS.WotsError.codes.INVALID_INCIDENT_ID: /* bad detail() id */     break;
     case WOTS.WotsError.codes.TIMEOUT:             /* request timed out */   break;
     case WOTS.WotsError.codes.NETWORK_ERROR:       /* transport error */     break;
-    default: /* REGISTER_FAILED, ACTIVATE_FAILED, RESEND_FAILED, ... */
+    default: /* REGISTER_FAILED, ACTIVATE_FAILED, RESEND_FAILED,
+               LIST_FAILED, DETAIL_FAILED, ... */
   }
 }
 ```
@@ -104,6 +106,18 @@ for (const r of reports.slice(0, 3)) {
 
 Options: `{ pageSize = 20, baseUrl, fetchImpl, timeoutMs }`. Pagination stops on an empty page or a short page. Server errors surface as `WotsError` with `err.status` attached; a 401/403 means the token is dead — re-authenticate.
 
+### `WOTS.detail(token, incidentId, opts?) → Promise<Incident>`
+
+Fetches the full `PublicIncident` object for a single report — resolution text, officer info, timestamps, `userContent` (comments + `imageUrls`), citation description, and the `props` map. Backed by `POST /api/incident/id` with `{ incidentId, userId }`; the `userId` again comes from the token's `sub` claim.
+
+```js
+const [first] = await WOTS.all(token);
+const full = await WOTS.detail(token, first.id);
+console.log(full.address, full.publicResolution, full.userContent.imageUrls);
+```
+
+Rejects synchronously with `WotsError('INVALID_INCIDENT_ID')` for a missing/non-string id. Server 4xx/5xx surface as `WotsError('DETAIL_FAILED', ...)` with `err.status` and `err.body` attached.
+
 ## Testing
 
 ```
@@ -112,12 +126,28 @@ npm test
 
 Runs `node --test` against `test/**/*.test.js`. HTTP is intercepted by `undici`'s `MockAgent` — no real network calls.
 
-## Live smoke test
+## Live smoke tests
 
-`spike/login.js` (git-ignored) is an interactive CLI that hits the real API. It prompts for the phone number (or reads `WOTS_PHONE`), prints the `userId`, then prompts for the SMS code with retry and resend support:
+Three git-ignored scripts under `spike/` exercise the real API end-to-end. Each accepts either an environment variable or an interactive prompt.
+
+**`spike/login.js`** — full auth flow. Prompts for the phone number (or reads `WOTS_PHONE`), prints the `userId`, then prompts for the 4-digit SMS code with retry + `resend` support. On success, prints the JWT and decoded `sub` / `auth` / `exp`.
 
 ```
 node spike/login.js
 ```
 
 For a phone number with an existing WOTS account, `startLogin` reattaches to it (see [Note on account reattachment](#note-on-account-reattachment)); for a phone number with no prior account, it creates one. Either way, hitting `register/account` too often can trip the server-side `SMS_THRESHOLD` rate limit — don't hammer it.
+
+**`spike/all.js`** — dumps a 10-row preview of every one of your own reports. Reads `WOTS_TOKEN` from the environment, or prompts.
+
+```
+WOTS_TOKEN=eyJ... node spike/all.js
+```
+
+**`spike/detail.js`** — pretty-prints the full detail for one incident. Takes the incidentId as its first argv or from a prompt.
+
+```
+WOTS_TOKEN=eyJ... node spike/detail.js <incidentId>
+```
+
+**Typical loop:** `spike/login.js` → copy the JWT into `WOTS_TOKEN` → `spike/all.js` → copy an `id` from the preview → `spike/detail.js <id>`.

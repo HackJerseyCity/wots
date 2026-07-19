@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { MockAgent, setGlobalDispatcher } = require('undici');
 
-const { all } = require('../src/incidents');
+const { all, detail } = require('../src/incidents');
 const { BASE_URL } = require('../src/constants');
 
 function withMock() {
@@ -141,4 +141,72 @@ test('all: propagates server error as WotsError', async (t) => {
     .reply(401, { type: 'UNAUTHORIZED' }, { headers: { 'content-type': 'application/json' } });
 
   await assert.rejects(all(tokenFor('u1')), (err) => err.status === 401);
+});
+
+// --- detail ------------------------------------------------------------
+
+test('detail: POSTs {incidentId, userId} and returns parsed body', async (t) => {
+  const agent = withMock();
+  t.after(() => agent.close());
+  let seen;
+
+  const shape = { id: 'inc-1', address: '123 Main St', typeName: 'Other illegal parking' };
+  agent.get(BASE_URL).intercept({ path: '/api/incident/id', method: 'POST' })
+    .reply((opts) => {
+      seen = opts;
+      return { statusCode: 200, data: JSON.stringify(shape), responseOptions: { headers: { 'content-type': 'application/json' } } };
+    });
+
+  const out = await detail(tokenFor('u1'), 'inc-1');
+  assert.equal(seen.body, '{"incidentId":"inc-1","userId":"u1"}');
+  assert.deepEqual(out, shape);
+});
+
+test('detail: sends Authorization: Bearer <token>', async (t) => {
+  const agent = withMock();
+  t.after(() => agent.close());
+  let seen;
+  const token = tokenFor('u1');
+
+  agent.get(BASE_URL).intercept({ path: '/api/incident/id', method: 'POST' })
+    .reply((opts) => {
+      seen = opts;
+      return { statusCode: 200, data: '{}', responseOptions: { headers: { 'content-type': 'application/json' } } };
+    });
+
+  await detail(token, 'inc-1');
+  const authHeader = Object.entries(seen.headers)
+    .find(([k]) => k.toLowerCase() === 'authorization')?.[1];
+  assert.equal(authHeader, `Bearer ${token}`);
+});
+
+test('detail: rejects missing / non-string incidentId WITHOUT an HTTP call', async (t) => {
+  const agent = withMock();
+  t.after(() => agent.close());
+
+  await assert.rejects(detail(tokenFor('u1'), undefined), (err) => err.code === 'INVALID_INCIDENT_ID');
+  await assert.rejects(detail(tokenFor('u1'), ''), (err) => err.code === 'INVALID_INCIDENT_ID');
+  await assert.rejects(detail(tokenFor('u1'), 123), (err) => err.code === 'INVALID_INCIDENT_ID');
+  agent.assertNoPendingInterceptors();
+});
+
+test('detail: propagates JWT decode error for a bad token', async (t) => {
+  const agent = withMock();
+  t.after(() => agent.close());
+
+  await assert.rejects(detail('not-a-jwt', 'inc-1'), (err) => err.code === 'INVALID_JWT');
+  agent.assertNoPendingInterceptors();
+});
+
+test('detail: server 404 surfaces as WotsError with status', async (t) => {
+  const agent = withMock();
+  t.after(() => agent.close());
+
+  agent.get(BASE_URL).intercept({ path: '/api/incident/id', method: 'POST' })
+    .reply(404, { type: 'NOT_FOUND' }, { headers: { 'content-type': 'application/json' } });
+
+  await assert.rejects(
+    detail(tokenFor('u1'), 'missing'),
+    (err) => err.status === 404 && err.code === 'DETAIL_FAILED',
+  );
 });
