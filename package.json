@@ -9,10 +9,16 @@
   "author": "George Zalepa",
   "type": "commonjs",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=18"
+  },
   "directories": {
     "doc": "doc"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test 'test/**/*.test.js'"
+  },
+  "devDependencies": {
+    "undici": "^6.19.0"
   }
 }
